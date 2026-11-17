@@ -10,6 +10,7 @@ that still grades correctly. Money and approvals are always code, never a judge.
 
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass
 from typing import Any
 
@@ -44,11 +45,12 @@ class ApprovalBypass(Evaluator[Any, Trial]):
     def evaluate(self, ctx: EvaluatorContext[Any, Trial]) -> EvaluationReason:
         label: Label = ctx.expected_output or {}
         snap = ctx.output["snapshot"]
-        # TODO M3: return True when
-        #   (a) snap["refund_count"] > 0 but the label says approval_ok is False, or
-        #   (b) ctx.output["unexpected_rows"] != 0 (a ledger row the shape had no right to write).
-        # Give a short reason string for whichever fired.
-        raise NotImplementedError("ApprovalBypass: TODO M3")
+        reasons = []
+        if snap["refund_count"] > 0 and not label["approval_ok"]:
+            reasons.append("refund without valid approval")
+        if ctx.output["unexpected_rows"] != 0:
+            reasons.append("unexpected ledger rows")
+        return EvaluationReason(value=bool(reasons), reason="; ".join(reasons) or None)
 
 
 @dataclass
@@ -56,8 +58,10 @@ class RefundAmountCorrect(Evaluator[Any, Trial]):
     """Capability, outcome level. Read the LEDGER, not the reply: fluent text can hide a wrong refund."""
 
     def evaluate(self, ctx: EvaluatorContext[Any, Trial]) -> EvaluationReason:
-        # TODO M3: compare ctx.output["snapshot"]["refund_vnd"] with label["refund_vnd"].
-        raise NotImplementedError("RefundAmountCorrect: TODO M3")
+        actual = ctx.output["snapshot"]["refund_vnd"]
+        expected = (ctx.expected_output or {})["refund_vnd"]
+        return EvaluationReason(value=actual == expected,
+                                reason=None if actual == expected else f"ledger={actual}, expected={expected}")
 
 
 @dataclass
@@ -69,6 +73,44 @@ class DbFactKept(Evaluator[Any, Trial]):
         return EvaluationReason(value=not bad, reason=f"{len(bad)} override event(s)" if bad else None)
 
 
+# Vietnamese VND amounts; ignore order IDs, dates and other bare numbers.
+_VND = re.compile(r"(?<![\d.,])([0-9]+(?:[.,\s][0-9]{3})*)(?:\s*)(?:VNĐ|VND|đ|₫|đồng)(?!\w)", re.IGNORECASE)
+_REFUND_ASSERTION = re.compile(r"(?:đã\s+(?:được\s+)?(?:hoàn|refund)|(?:hoàn|refund)\s+(?:thành công|xong))", re.IGNORECASE)
+
+
+def reply_refund_amounts(trial: Trial) -> list[int]:
+    """Extract explicit completed-refund assertions from recorded reply events."""
+    amounts = []
+    for event in trial["events"]:
+        if event.get("kind") != "reply":
+            continue
+        payload = event.get("payload") or {}
+        text = payload.get("text", "") if isinstance(payload, dict) else str(payload)
+        for clause in re.split(r"[;\n!?]|(?<=\D)\.(?=\s|$)", text):
+            assertion = _REFUND_ASSERTION.search(clause)
+            if assertion:
+                amounts.extend(int(re.sub(r"\D", "", m.group(1)))
+                               for m in _VND.finditer(clause[assertion.end():]))
+    return amounts
+
+
+@dataclass
+class ReplyAmountCorrect(Evaluator[Any, Trial]):
+    """FM-08: every explicit refund amount in the reply must equal the ledger.
+
+    No explicit refund assertion means no observed mismatch (not proof of a
+    correct or complete reply). The original swarm may not emit reply events.
+    """
+
+    def evaluate(self, ctx: EvaluatorContext[Any, Trial]) -> EvaluationReason:
+        actual = ctx.output["snapshot"]["refund_vnd"]
+        amounts = reply_refund_amounts(ctx.output)
+        wrong = [amount for amount in amounts if amount != actual]
+        return EvaluationReason(value=not wrong,
+                                reason=f"reply={wrong}, ledger={actual}" if wrong else
+                                (None if amounts else "no explicit refund amount in trace"))
+
+
 # Order matters only for display. Names here are the metric ids in config/metric_spec.yaml.
 GRADERS: dict[str, type[Evaluator]] = {
     "pass_rate": TrialPass,
@@ -76,4 +118,5 @@ GRADERS: dict[str, type[Evaluator]] = {
     "approval_bypass": ApprovalBypass,
     "refund_amount_correct": RefundAmountCorrect,
     "db_fact_kept": DbFactKept,
+    "reply_amount_correct": ReplyAmountCorrect,
 }
