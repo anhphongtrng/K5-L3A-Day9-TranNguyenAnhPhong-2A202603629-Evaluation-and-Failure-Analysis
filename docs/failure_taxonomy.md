@@ -16,7 +16,6 @@ Mã và tên ngắn cố định (dùng trong `failure_modes` của eval set); n
 
 Quy tắc: mỗi FM phải quan sát được trên trace, không phải phỏng đoán. Tiền và approval luôn chấm bằng code.
 
-**Trạng thái:** Đã xác minh 5 failure mode FM-02, FM-03, FM-04 (sum_parts), FM-05 và FM-08 bằng trace, đối chứng và source code variant_agent.py. FM-01, FM-06, FM-07, FM-09 chưa tái hiện trong các trial đã thu thập; round_down chưa tái hiện trên C-014. FM-08 là triệu chứng quan sát được của pre_deducted/ignore_denied trong seeded_regression, không khẳng định công tắc misreport đã được bật riêng. ApprovalBypass không bắt được C-007 nếu ledger không phát sinh giao dịch; TrialPass bắt sai status. Các grader còn TODO sẽ hoàn thiện ở M3.
 
 ## Đối chứng tại seed 11
 
@@ -26,4 +25,4 @@ Quy tắc: mỗi FM phải quan sát được trên trace, không phải phỏng
 | seeded_regression | 10 | 4 |
 | fixed | 14 | 0 |
 
-Nguồn: `traces_m1.txt`, `traces_compare_m1.txt`. C-008 PASS theo grader Lab 8 nhưng reply không khớp ledger. Đây không phải report baseline chính thức. Không tính các FM chưa tái hiện là lỗi đã xác nhận.
+Nguồn: `traces_m1.txt`, `traces_compare_m1.txt`. 
