@@ -44,8 +44,36 @@ def slice_check(pr: dict, base: dict, spec: dict) -> tuple[list[str], list[str]]
       - fail if below "min", or if no_significant_drop and the paired CI over the slice's items
         lies entirely below 0
     Return (blocked ids like "slice:money_movement/pass_rate", report lines)."""
-    # TODO M5
-    return [], []
+    blocked, lines = [], []
+    bs = spec.get("bootstrap", {})
+    for entry in spec.get("slices", []):
+        name, metric = entry["name"], entry["metric"]
+        sid = f"slice:{name}/{metric}"
+        a = per_item(pr, metric, slice_name=name)
+        b = per_item(base, metric, slice_name=name)
+        value = sum(a.values()) / len(a) if a else None
+        failed = value is None or ("min" in entry and value < entry["min"])
+        note = ""
+        if entry.get("no_significant_drop"):
+            if not a or set(a) != set(b):
+                failed = True
+                note = "missing or mismatched paired slice items"
+            else:
+                keys = sorted(a)
+                d, lo, hi = stats.paired_bootstrap(
+                    [a[k] for k in keys], [b[k] for k in keys],
+                    n_resamples=bs.get("n_resamples", 1000),
+                    rng=bs.get("rng", 2027),
+                    confidence=bs.get("confidence", 0.95),
+                )
+                note = f"Δ {d:+.3f} CI [{lo:+.3f}, {hi:+.3f}]"
+                failed = failed or hi < 0
+        if failed and entry.get("blocking"):
+            blocked.append(sid)
+        verdict = "BLOCK" if failed and entry.get("blocking") else "warn" if failed else "ok"
+        shown = f"{value:.4f}" if value is not None else "None"
+        lines.append(f"  {sid:<36} {shown:<8} min={entry.get('min', '-')} {note} {verdict}")
+    return blocked, lines
 
 
 def check(pr: dict, base: dict, spec: dict, base_spec: dict | None = None) -> tuple[list[str], list[str]]:
